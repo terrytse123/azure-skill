@@ -36,8 +36,9 @@ Always expand nested `virtualNetworks.properties.subnets` even if Resource Graph
 
 | File | Use |
 |---|---|
-| diagram.mmd | Paste into Markdown |
-| diagram.html | Open in a browser (needs Mermaid CDN) |
-| diagram.drawio | Edit in diagrams.net |
+| diagram.html | Open in a browser. Azure icons, columns by layer |
+| diagram.drawio | Edit in diagrams.net. Nodes are Azure icon images |
 | inventory.md | Name, type, location, edges, unlinked |
 | model.json | Machine-readable nodes and edges |
+
+Do not emit Mermaid. If an icon is missing, use the category fallback icon and keep the resource name.

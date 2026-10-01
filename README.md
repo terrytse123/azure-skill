@@ -4,16 +4,15 @@ Agent skills for Azure work.
 
 ## azure-rg-diagram
 
-Read-only skill that inventories an Azure resource group (or an ARM / Resource Graph export) and generates an infrastructure diagram.
+Read-only skill that inventories an Azure resource group (or an ARM / Resource Graph export) and generates an infrastructure diagram with Azure architecture icons.
 
 Outputs:
 
-- `diagram.mmd` — Mermaid source
-- `diagram.html` — browser preview
-- `diagram.drawio` — editable diagrams.net file
+- `diagram.html` — layered diagram, Azure icons, relationship lines
+- `diagram.drawio` — same icons, editable in diagrams.net
 - `inventory.md` — resources and inferred relationships
 
-Edges are drawn only when one resource's properties contain another resource's ID. The skill does not deploy or modify Azure resources.
+No Mermaid output. Edges are drawn only when one resource's properties contain another resource's ID. The skill does not deploy or modify Azure resources.
 
 ```bash
 azure-rg-diagram/scripts/collect_rg.sh <resource-group> [subscription] ./azure-rg-export
@@ -23,9 +22,11 @@ python3 azure-rg-diagram/scripts/build_diagram.py \
   --title "<resource-group>"
 ```
 
+Open `diagram.html` in a browser. Open `diagram.drawio` in [diagrams.net](https://app.diagrams.net/).
+
 ## Sample run
 
-Input is the checked-in export `azure-rg-diagram/assets/sample-rg.json` (a Resource Graph-shaped payload for `rg-prod`: VNet, two subnets, NSG, load balancer, public IP, NIC, VM, private endpoint, SQL server, Key Vault).
+Input: `azure-rg-diagram/assets/sample-rg.json` (`rg-prod`: VNet, two subnets, NSG, load balancer, public IP, NIC, VM, private endpoint, SQL server, Key Vault).
 
 ```bash
 python3 azure-rg-diagram/scripts/build_diagram.py \
@@ -34,41 +35,13 @@ python3 azure-rg-diagram/scripts/build_diagram.py \
   --title rg-prod
 ```
 
-Result: **11 resources, 9 edges**. Nested subnets are expanded even though they were not separate rows. Key Vault stays unlinked because the export has no resource-id reference to it.
+Result: **11 resources, 9 edges**. Nested subnets are expanded. Key Vault stays unlinked because the export has no resource-id reference to it.
 
-```mermaid
-flowchart TB
-  subgraph network[network]
-    n0["vnet-app"]
-    n9["snet-web"]
-    n10["snet-data"]
-    n1["nsg-web"]
-    n3["lb-web"]
-    n2["pip-lb"]
-    n4["nic-web-01"]
-    n7["pe-sql"]
-  end
-  subgraph compute[compute]
-    n5["vm-web-01"]
-  end
-  subgraph data[data]
-    n6["sql-app"]
-  end
-  subgraph security[security]
-    n8["kv-app"]
-  end
-  n0 -->|subnets| n9
-  n0 -->|subnets| n10
-  n0 -->|network security group| n1
-  n9 -->|network security group| n1
-  n3 -->|public ipaddress| n2
-  n4 -->|subnet| n9
-  n5 -->|network interfaces| n4
-  n7 -->|subnet| n10
-  n7 -->|private link service id| n6
-```
+Preview the generated picture: [sample-out/diagram.html](sample-out/diagram.html). Editable file: [sample-out/diagram.drawio](sample-out/diagram.drawio).
 
-Relationships written to `inventory.md`:
+Layout is columns left to right: network, compute, data, security. Each node is an Azure architecture icon plus the resource name.
+
+Relationships:
 
 - vnet-app → snet-web, snet-data, nsg-web
 - snet-web → nsg-web

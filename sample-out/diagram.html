@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>rg-prod</title>
+  <style>
+    body { margin: 0; font-family: "Segoe UI", sans-serif; background: #f3f2f1; color: #201f1e; }
+    header { padding: 20px 28px 8px; }
+    h1 { margin: 0; color: #0078d4; font-size: 22px; }
+    p { margin: 6px 0 0; color: #605e5c; }
+    #board { position: relative; margin: 16px; padding: 18px; background: #fff; border: 2px solid #0078d4; border-radius: 12px; }
+    .cols { display: flex; gap: 28px; align-items: flex-start; position: relative; z-index: 1; }
+    .col { min-width: 180px; }
+    .col h2 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); }
+    .card { width: 148px; margin: 0 0 22px; text-align: center; }
+    .card img { width: 52px; height: 52px; }
+    .card strong, .card span { display: block; }
+    .card strong { font-size: 13px; }
+    .card span { font-size: 11px; color: #605e5c; }
+    svg.links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>rg-prod</h1>
+    <p>Azure resource group. Icons are the Azure architecture set. Lines are resource-id references, not guessed traffic.</p>
+  </header>
+  <div id="board">
+    <svg class="links" id="links"></svg>
+    <div class="cols"><section class="col" style="--accent:#5C2D91"><h2>network</h2><article class="card" id="n0" data-node="n0"><img alt="" src="https://cdn.jsdelivr.net/gh/jgraph/drawio@dev/src/main/webapp/img/lib/azure2/networking/Virtual_Networks.svg"/><strong>vnet-app</strong><span>virtualNetworks</span></article><article class="card" id="n1" data-node="n1"><img alt="" src="https://cdn.jsdelivr.net/gh/jgraph/drawio@dev/src/main/webapp/img/lib/azure2/networking/Network_Security_Groups.svg"/><strong>nsg-web</strong><span>networkSecurityGroups</span></article><article class="card" id="n2" data-node="n2"><img alt="" src="https://cdn.jsdelivr.net/gh/jgraph/drawio@dev/src/main/webapp/img/lib/azure2/networking/Public_IP_Addresses.svg"/><strong>pip-lb</strong><span>publicIPAddresses</span></article><article class="card" id="n3" data-node="n3"><img alt="" src="https://cdn.jsdelivr.net/gh/jgraph/drawio@dev/src/main/webapp/img/lib/azure2/networking/Load_Balancers.svg"/><strong>lb-web</strong><span>loadBalancers</span></article><article class="card" id="n4" data-node="n4"><img alt="" src="https://cdn.jsdelivr.net/gh/jgraph/drawio@dev/src/main/webapp/img/lib/azure2/networking/Network_Interfaces.svg"/><strong>nic-web-01</strong><span>networkInterfaces</span></article><article class="card" id="n7" data-node="n7"><img alt="" src="https://cdn.jsdelivr.net/gh/jgraph/drawio@dev/src/main/webapp/img/lib/azure2/networking/Private_Endpoint.svg"/><strong>pe-sql</strong><span>privateEndpoints</span></article><article class="card" id="n9" data-node="n9"><img alt="" src="https://cdn.jsdelivr.net/gh/jgraph/drawio@dev/src/main/webapp/img/lib/azure2/networking/Subnet.svg"/><strong>snet-web</strong><span>subnets</span></article><article class="card" id="n10" data-node="n10"><img alt="" src="https://cdn.jsdelivr.net/gh/jgraph/drawio@dev/src/main/webapp/img/lib/azure2/networking/Subnet.svg"/><strong>snet-data</strong><span>subnets</span></article></section><section class="col" style="--accent:#0078D4"><h2>compute</h2><article class="card" id="n5" data-node="n5"><img alt="" src="https://cdn.jsdelivr.net/gh/jgraph/drawio@dev/src/main/webapp/img/lib/azure2/compute/Virtual_Machine.svg"/><strong>vm-web-01</strong><span>virtualMachines</span></article></section><section class="col" style="--accent:#008272"><h2>data</h2><article class="card" id="n6" data-node="n6"><img alt="" src="https://cdn.jsdelivr.net/gh/jgraph/drawio@dev/src/main/webapp/img/lib/azure2/databases/SQL_Server.svg"/><strong>sql-app</strong><span>servers</span></article></section><section class="col" style="--accent:#D83B01"><h2>security</h2><article class="card" id="n8" data-node="n8"><img alt="" src="https://cdn.jsdelivr.net/gh/jgraph/drawio@dev/src/main/webapp/img/lib/azure2/security/Key_Vaults.svg"/><strong>kv-app</strong><span>vaults</span></article></section></div>
+  </div>
+  <script>
+    const edges = [{"from": "n0", "to": "n9", "label": "subnets"}, {"from": "n0", "to": "n1", "label": "network security group"}, {"from": "n0", "to": "n10", "label": "subnets"}, {"from": "n3", "to": "n2", "label": "public ipaddress"}, {"from": "n4", "to": "n9", "label": "subnet"}, {"from": "n5", "to": "n4", "label": "network interfaces"}, {"from": "n7", "to": "n10", "label": "subnet"}, {"from": "n7", "to": "n6", "label": "private link service id"}, {"from": "n9", "to": "n1", "label": "network security group"}];
+    function draw() {
+      const board = document.getElementById("board");
+      const svg = document.getElementById("links");
+      const rect = board.getBoundingClientRect();
+      svg.setAttribute("viewBox", `0 0 ${board.clientWidth} ${board.clientHeight}`);
+      svg.innerHTML = '<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6" fill="#0078D4"/></marker></defs>';
+      for (const edge of edges) {
+        const a = document.getElementById(edge.from).getBoundingClientRect();
+        const b = document.getElementById(edge.to).getBoundingClientRect();
+        const x1 = a.left + a.width / 2 - rect.left;
+        const y1 = a.top + 26 - rect.top;
+        const x2 = b.left + b.width / 2 - rect.left;
+        const y2 = b.top + 26 - rect.top;
+        const mid = (x1 + x2) / 2;
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`);
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", "#0078D4");
+        path.setAttribute("stroke-width", "1.4");
+        path.setAttribute("marker-end", "url(#arrow)");
+        svg.appendChild(path);
+      }
+    }
+    window.addEventListener("load", draw);
+    window.addEventListener("resize", draw);
+  </script>
+</body>
+</html>

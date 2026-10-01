@@ -7,7 +7,7 @@
       "assertions": [
         "Runs collect_rg.sh or an equivalent Resource Graph query against rg-prod-eus",
         "Does not deploy or modify Azure resources",
-        "Runs build_diagram.py and returns Mermaid plus diagram.drawio",
+        "Runs build_diagram.py and returns diagram.html plus diagram.drawio using Azure icons, not Mermaid",
         "Summarizes network, compute, and data resources and lists unlinked resources separately"
       ]
     },

@@ -1,6 +1,6 @@
 ---
 name: azure-rg-diagram
-description: "Inventories an Azure resource group or an ARM or Resource Graph export and generates an infrastructure diagram in Mermaid and draw.io. Use when the user asks to diagram, map, visualize, or document Azure resources in a resource group or subscription, including network, compute, data, and security relationships. Not for deploying Azure resources, writing Bicep or Terraform, or non-Azure cloud diagrams."
+description: "Inventories an Azure resource group or an ARM or Resource Graph export and generates an infrastructure diagram using Azure architecture icons in HTML and draw.io. Use when the user asks to diagram, map, visualize, or document Azure resources in a resource group or subscription, including network, compute, data, and security relationships. Not for deploying Azure resources, writing Bicep or Terraform, or non-Azure cloud diagrams."
 type: workflow
 lifecycle: active
 ---
@@ -20,18 +20,17 @@ python3 scripts/build_diagram.py --input <out-dir>/resources.json --out <out-dir
 ```
 
 4. Read `diagram/inventory.md` and `diagram/model.json`. Apply `references/diagram-rules.md` before showing the picture: drop governance noise, keep private endpoints, do not invent edges.
-5. Deliver `diagram.mmd`, `diagram.drawio`, `diagram.html`, and `inventory.md`. Summarize resource counts by category, name the VNets and entry points (App Gateway, Front Door, public IP, Load Balancer), and list unlinked resources as unverified — not as isolated by design.
+5. Deliver `diagram.html`, `diagram.drawio`, and `inventory.md`. Do not generate a Mermaid diagram. Summarize resource counts by category, name the VNets and entry points (App Gateway, Front Door, public IP, Load Balancer), and list unlinked resources as unverified — not as isolated by design.
 
 ## Outputs
 
 | File | Show the user |
 |---|---|
-| diagram.mmd | Mermaid source, also paste the fenced block in the reply |
-| diagram.html | Browser preview |
-| diagram.drawio | Editable diagrams.net file |
+| diagram.html | Layered diagram with Azure architecture icons and relationship lines |
+| diagram.drawio | Same icons, editable in diagrams.net |
 | inventory.md | Table of resources and inferred relationships |
 
-Paste the Mermaid block in the reply so the diagram is visible without opening files. Mention that edge labels come from resource-id references in properties, not from guessed traffic flows.
+Open `diagram.html` for the picture. Mention that lines come from resource-id references in properties, not from guessed traffic flows. Icons load from the diagrams.net Azure architecture set.
 
 ## Scope limits
 
