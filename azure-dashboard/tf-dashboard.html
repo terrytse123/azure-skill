@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Terraform infrastructure dashboard</title>
+<style>
+  :root { --bg:#f3f2f1; --card:#fff; --ink:#201f1e; --muted:#605e5c; --line:#e1dfdd; --blue:#0078d4; --high:#d83b01; --med:#ca5010; --ok:#107c10; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:"Segoe UI",Arial,sans-serif; background:var(--bg); color:var(--ink); }
+  header { background:#fff; border-bottom:1px solid var(--line); padding:16px 22px; }
+  h1 { margin:0; color:var(--blue); font-size:20px; }
+  form { display:flex; gap:8px; margin-top:12px; }
+  input[type="url"], input[type="password"] { flex:1; border:1px solid var(--line); border-radius:6px; padding:8px 10px; font:inherit; }
+  button { border:1px solid var(--blue); background:var(--blue); color:#fff; border-radius:6px; padding:8px 14px; font:inherit; cursor:pointer; }
+  .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; padding:14px 22px 0; }
+  .kpi { background:#fff; border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .kpi b { display:block; font-size:22px; }
+  .kpi span { color:var(--muted); font-size:12px; }
+  main { display:grid; grid-template-columns:260px 1fr 320px; gap:12px; padding:14px 22px 22px; }
+  section { background:#fff; border:1px solid var(--line); border-radius:10px; padding:12px; min-height:280px; }
+  h2 { margin:0 0 10px; font-size:14px; }
+  .res, .node { cursor:pointer; }
+  .res { display:flex; gap:8px; align-items:center; padding:8px; border-radius:8px; }
+  .res.on, .res:hover, .node.on { background:#eff6fc; }
+  .res img, .node img { width:28px; height:28px; }
+  .node img { width:42px; height:42px; }
+  .res b, .node b { display:block; font-size:13px; }
+  .res span, .node span, .note { color:var(--muted); font-size:11px; }
+  #board { position:relative; overflow:auto; min-height:460px; }
+  svg.links { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+  .cols { display:flex; gap:18px; position:relative; z-index:1; }
+  .col { min-width:150px; }
+  .col h3 { margin:0 0 8px; font-size:11px; letter-spacing:.04em; text-transform:uppercase; color:var(--blue); }
+  .node { width:140px; text-align:center; margin:0 0 16px; border-radius:8px; padding:4px; }
+  .issue { border-left:4px solid var(--med); background:#fff8f5; border-radius:6px; padding:8px 10px; margin:0 0 8px; }
+  .issue.high { border-color:var(--high); }
+  .issue.info { border-color:var(--blue); background:#f3f9fd; }
+  .issue.ok { border-color:var(--ok); background:#f3faf3; }
+  .issue b { display:block; font-size:13px; }
+  dl { margin:0; } dt { color:var(--muted); font-size:11px; margin-top:8px; } dd { margin:2px 0 0; font-size:13px; word-break:break-all; }
+  #status { color:var(--muted); font-size:13px; margin:8px 0 0; }
+  @media (max-width:980px) { main, .kpis { grid-template-columns:1fr; } form { flex-wrap:wrap; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Terraform infrastructure dashboard</h1>
+  <p class="note">輸入公開 GitHub repo。私有 repo 可加 token（只留在這個瀏覽器，不會上傳）。</p>
+  <form id="form">
+    <input id="repo" type="url" required placeholder="https://github.com/owner/repo" value="https://github.com/terrytse123/ai_model"/>
+    <input id="token" type="password" placeholder="GitHub token（私有 repo 才需要）"/>
+    <button type="submit">建立圖表</button>
+  </form>
+  <p id="status">尚未載入。</p>
+</header>
+<div class="kpis">
+  <div class="kpi"><b id="k-res">0</b><span>resources</span></div>
+  <div class="kpi"><b id="k-edge">0</b><span>connectivity links</span></div>
+  <div class="kpi"><b id="k-cfg">0</b><span>configuration issues</span></div>
+  <div class="kpi"><b id="k-net">0</b><span>network issues</span></div>
+</div>
+<main>
+  <section><h2>Resources</h2><div id="list"></div></section>
+  <section><h2>Infrastructure diagram</h2><div id="board"><svg class="links" id="links"></svg><div class="cols" id="cols"></div></div></section>
+  <section><h2>Basic information</h2><div id="detail" class="note">選擇一個資源。</div></section>
+</main>
+<section style="margin:0 22px 22px">
+  <h2>Configuration and network checks</h2>
+  <div id="issues" class="note">建立圖表後會列出設定與網路問題。連線只來自 Terraform reference，不會猜測流量。</div>
+</section>
+<script>
+const ICON = "https://cdn.jsdelivr.net/gh/jgraph/drawio@dev/src/main/webapp/img/lib/azure2";
+const ICONS = {
+  azurerm_resource_group: ICON+"/general/Resource_Groups.svg",
+  azurerm_storage_account: ICON+"/storage/Storage_Accounts.svg",
+  azurerm_virtual_network: ICON+"/networking/Virtual_Networks.svg",
+  azurerm_subnet: ICON+"/networking/Subnet.svg",
+  azurerm_network_security_group: ICON+"/networking/Network_Security_Groups.svg",
+  azurerm_public_ip: ICON+"/networking/Public_IP_Addresses.svg",
+  azurerm_lb: ICON+"/networking/Load_Balancers.svg",
+  azurerm_network_interface: ICON+"/networking/Network_Interfaces.svg",
+  azurerm_private_endpoint: ICON+"/networking/Private_Endpoint.svg",
+  azurerm_linux_virtual_machine: ICON+"/compute/Virtual_Machine.svg",
+  azurerm_windows_virtual_machine: ICON+"/compute/Virtual_Machine.svg",
+  azurerm_virtual_machine: ICON+"/compute/Virtual_Machine.svg",
+  azurerm_key_vault: ICON+"/security/Key_Vaults.svg",
+  azurerm_mssql_server: ICON+"/databases/SQL_Server.svg"
+};
+const LAYER = { resource_group:"foundation", virtual_network:"network", subnet:"network", network_security_group:"network", public_ip:"network", lb:"network", network_interface:"network", private_endpoint:"network", virtual_machine:"compute", linux_virtual_machine:"compute", windows_virtual_machine:"compute", storage_account:"data", mssql_server:"data", key_vault:"security" };
+let resources = [], edges = [], issues = [], selected = null;
+
+function parseRepo(raw) {
+  const u = new URL(raw.includes("://") ? raw : "https://github.com/" + raw);
+  const p = u.pathname.split("/").filter(Boolean);
+  if (p.length < 2) throw new Error("網址需要 owner/repo");
+  return { owner: p[0], repo: p[1].replace(/\.git$/, ""), ref: p[2] === "tree" ? p[3] : "HEAD", sub: p[2] === "tree" && p.length > 4 ? p.slice(4).join("/") : "" };
+}
+function headers(token) { return token ? { Authorization: "Bearer " + token, Accept: "application/vnd.github+json" } : { Accept: "application/vnd.github+json" }; }
+async function gh(url, token) {
+  const res = await fetch(url, { headers: headers(token) });
+  if (!res.ok) throw new Error(res.status + " " + url);
+  return res.json();
+}
+function strip(text) { return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\n)\s*#.*$/gm, "").replace(/(^|\n)\s*\/\/.*$/gm, ""); }
+function blocks(text) {
+  text = strip(text); const out = []; let i = 0;
+  while (i < text.length) {
+    const m = text.slice(i).match(/^[A-Za-z0-9_."-]+(?:\s+[A-Za-z0-9_."-]+)*/);
+    if (!m) { i++; continue; }
+    let j = i + m[0].length; while (text[j] === " " || text[j] === "\n") j++;
+    if (text[j] !== "{") { i = j; continue; }
+    let depth = 0, k = j;
+    for (; k < text.length; k++) { if (text[k] === "{") depth++; else if (text[k] === "}" && --depth === 0) { out.push([m[0].trim(), text.slice(j+1, k)]); i = k+1; break; } }
+    if (k >= text.length) break;
+  }
+  return out;
+}
+function attrs(body) {
+  const keep = ["name","location","resource_group_name","sku_name","sku","account_tier","account_replication_type","address_space","address_prefixes","vm_size","size","public_network_access_enabled","https_traffic_only_enabled","source"];
+  const found = {};
+  for (const m of body.matchAll(/^\s*([A-Za-z0-9_]+)\s*=\s*("(?:\\.|[^"\\])*"|[^\n#]+)/gm)) {
+    if (keep.includes(m[1])) found[m[1]] = m[2].trim().replace(/^"|"$/g, "").replace(/,$/, "");
+  }
+  return found;
+}
+function parseTf(files) {
+  const resources = [];
+  for (const file of files) {
+    for (const [header, body] of blocks(file.text)) {
+      const parts = header.split(/\s+/);
+      if (parts[0] !== "resource" || parts.length < 3) continue;
+      const type = parts[1].replace(/"/g, ""), name = parts[2].replace(/"/g, "");
+      const refs = [...new Set([...body.matchAll(/\b((?:azurerm|aws|google|azapi)_[A-Za-z0-9_]+)\.([A-Za-z0-9_]+)/g)].map(m => m[1]+"."+m[2]))];
+      resources.push({ id: type+"."+name, type, name, file: file.path, attrs: attrs(body), refs });
+    }
+  }
+  const ids = new Set(resources.map(r => r.id));
+  const edges = [];
+  for (const r of resources) for (const ref of r.refs) if (ids.has(ref) && ref !== r.id) edges.push({ from: r.id, to: ref });
+  return { resources, edges };
+}
+function checks(list, links) {
+  const out = [];
+  const byId = Object.fromEntries(list.map(r => [r.id, r]));
+  const linked = new Set(links.flatMap(e => [e.from, e.to]));
+  if (!list.some(r => r.type.endsWith("resource_group"))) out.push({ sev:"info", kind:"config", title:"沒有 resource group", text:"檔案裡沒有 azurerm_resource_group，資源可能引用外部 group。" });
+  for (const r of list) {
+    if (!r.attrs.name) out.push({ sev:"medium", kind:"config", title:r.id+" 沒有 name", text:"基本設定缺少 name。檔案 "+r.file });
+    if (!r.type.endsWith("resource_group") && !r.attrs.location && !r.refs.some(x => x.endsWith("resource_group") || byId[x])) out.push({ sev:"info", kind:"config", title:r.id+" 沒有 location", text:"location 不是字面值，也沒有看到 resource group reference。" });
+    if (r.type === "azurerm_storage_account") {
+      const n = r.attrs.name || "";
+      if (n && !/^[a-z0-9]{3,24}$/.test(n)) out.push({ sev:"high", kind:"config", title:n+" 不是合法 storage account 名稱", text:"必須是 3-24 個小寫英數。現值: "+n });
+      if (r.attrs.https_traffic_only_enabled === "false") out.push({ sev:"high", kind:"network", title:r.id+" 允許 HTTP", text:"https_traffic_only_enabled = false。" });
+      if (r.attrs.public_network_access_enabled !== "false") out.push({ sev:"high", kind:"network", title:r.id+" 公開網路未關閉", text:"沒有 private endpoint，而且 public_network_access_enabled 不是 false。" });
+    }
+    if (r.type === "azurerm_subnet" && !r.refs.some(x => x.includes("network_security_group"))) out.push({ sev:"high", kind:"network", title:r.id+" 沒有 NSG", text:"subnet 沒有引用 network security group。" });
+    if (/key_vault|mssql_server|storage_account/.test(r.type) && !list.some(x => x.type === "azurerm_private_endpoint" && x.refs.includes(r.id))) {
+      if (r.type !== "azurerm_storage_account") out.push({ sev:"medium", kind:"network", title:r.id+" 沒有 private endpoint", text:"資料服務沒有在這個 repo 連到 private endpoint。" });
+    }
+    if (!linked.has(r.id) && !r.type.endsWith("resource_group")) out.push({ sev:"info", kind:"network", title:r.id+" 沒有連線", text:"沒有其他資源用 Terraform reference 指向它，或它沒有指向別人。這不是實測不通，只是設定裡沒有連線。" });
+  }
+  if (!out.length) out.push({ sev:"ok", kind:"config", title:"沒有發現設定或網路問題", text:"檢查涵蓋名稱、NSG、公開存取、private endpoint 與 reference 連線。" });
+  return out;
+}
+function icon(type) { return ICONS[type] || ICON+"/general/Resource_Groups.svg"; }
+function layer(type) { return LAYER[type.split("_").slice(1).join("_")] || "other"; }
+function css(id) { return id.replace(/[^a-z0-9]+/gi, "-"); }
+function render() {
+  document.getElementById("k-res").textContent = resources.length;
+  document.getElementById("k-edge").textContent = edges.length;
+  document.getElementById("k-cfg").textContent = issues.filter(i => i.kind === "config" && i.sev !== "ok").length;
+  document.getElementById("k-net").textContent = issues.filter(i => i.kind === "network").length;
+  document.getElementById("list").innerHTML = resources.map(r => `<div class="res" data-id="${r.id}"><img alt="" src="${icon(r.type)}"/><div><b>${r.attrs.name || r.name}</b><span>${r.type}</span></div></div>`).join("");
+  const layers = ["foundation","network","compute","data","security","other"];
+  document.getElementById("cols").innerHTML = layers.map(name => {
+    const items = resources.filter(r => layer(r.type) === name);
+    if (!items.length) return "";
+    return `<div class="col"><h3>${name}</h3>${items.map(r => `<div class="node" id="n-${css(r.id)}" data-id="${r.id}"><img alt="" src="${icon(r.type)}"/><b>${r.attrs.name || r.name}</b><span>${r.attrs.location || r.attrs.account_tier || r.type.split("_").slice(1).join(" ")}</span></div>`).join("")}</div>`;
+  }).join("");
+  document.getElementById("issues").innerHTML = issues.map(i => `<div class="issue ${i.sev}"><b>${i.title}</b><span>${i.text}</span></div>`).join("");
+  if (resources[0]) show(resources[0].id);
+  requestAnimationFrame(drawLinks);
+}
+function show(id) {
+  selected = id;
+  const r = resources.find(x => x.id === id);
+  document.querySelectorAll("[data-id]").forEach(el => el.classList.toggle("on", el.dataset.id === id));
+  const rows = [["terraform", r.id], ["file", r.file], ...Object.entries(r.attrs), ["refs", r.refs.join(", ") || "-"]];
+  document.getElementById("detail").innerHTML = "<dl>"+rows.map(([k,v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")+"</dl>";
+}
+function drawLinks() {
+  const board = document.getElementById("board"), svg = document.getElementById("links"), rect = board.getBoundingClientRect();
+  svg.setAttribute("viewBox", `0 0 ${board.clientWidth} ${board.clientHeight}`);
+  svg.innerHTML = '<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6" fill="#0078D4"/></marker></defs>';
+  for (const e of edges) {
+    const a = document.getElementById("n-"+css(e.from)), b = document.getElementById("n-"+css(e.to));
+    if (!a || !b) continue;
+    const ar = a.getBoundingClientRect(), br = b.getBoundingClientRect();
+    const x1 = ar.left+ar.width/2-rect.left, y1 = ar.top+24-rect.top, x2 = br.left+br.width/2-rect.left, y2 = br.top+24-rect.top, mid = (x1+x2)/2;
+    const path = document.createElementNS("http://www.w3.org/2000/svg","path");
+    path.setAttribute("d", `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`);
+    path.setAttribute("fill","none"); path.setAttribute("stroke","#0078D4"); path.setAttribute("stroke-width","1.4"); path.setAttribute("marker-end","url(#arrow)");
+    svg.appendChild(path);
+  }
+}
+document.getElementById("form").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const status = document.getElementById("status");
+  try {
+    const { owner, repo, ref, sub } = parseRepo(document.getElementById("repo").value.trim());
+    const token = document.getElementById("token").value.trim();
+    status.textContent = "讀取 "+owner+"/"+repo+" ...";
+    const tree = await gh(`https://api.github.com/repos/${owner}/${repo}/git/trees/${ref}?recursive=1`, token);
+    const files = (tree.tree || []).filter(t => t.type === "blob" && t.path.endsWith(".tf") && !t.path.includes("/.terraform/") && (!sub || t.path.startsWith(sub)));
+    if (!files.length) throw new Error("這個 repo 沒有 .tf 檔");
+    const loaded = [];
+    for (const f of files.slice(0, 40)) {
+      const body = await gh(f.url, token);
+      loaded.push({ path: f.path, text: atob(body.content.replace(/\n/g, "")) });
+    }
+    const model = parseTf(loaded);
+    resources = model.resources; edges = model.edges; issues = checks(resources, edges);
+    status.textContent = owner+"/"+repo+" · "+loaded.length+" 個 .tf · "+resources.length+" 個 resources";
+    render();
+  } catch (err) { status.textContent = "失敗: "+err.message; }
+});
+document.body.addEventListener("click", e => { const el = e.target.closest("[data-id]"); if (el) show(el.dataset.id); });
+window.addEventListener("resize", drawLinks);
+</script>
+</body>
+</html>
