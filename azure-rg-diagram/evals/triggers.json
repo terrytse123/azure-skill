@@ -1,0 +1,25 @@
+{
+  "skill": "azure-rg-diagram",
+  "test_cases": [
+    {
+      "input": "Create an infrastructure diagram for Azure resource group rg-payments",
+      "should_trigger": true
+    },
+    {
+      "input": "Visualize the network and compute in this Resource Graph export of our Azure RG",
+      "should_trigger": true
+    },
+    {
+      "input": "Document the Azure architecture of resource group prod-shared as a draw.io diagram",
+      "should_trigger": true
+    },
+    {
+      "input": "Deploy a new virtual network and two VMs into rg-payments with Bicep",
+      "should_trigger": false
+    },
+    {
+      "input": "Draw an AWS VPC architecture for the production account",
+      "should_trigger": false
+    }
+  ]
+}

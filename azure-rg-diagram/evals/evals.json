@@ -1,0 +1,35 @@
+{
+  "skill": "azure-rg-diagram",
+  "test_cases": [
+    {
+      "name": "live_resource_group",
+      "input": "Diagram the Azure infrastructure in resource group rg-prod-eus in subscription Contoso-Prod.",
+      "assertions": [
+        "Runs collect_rg.sh or an equivalent Resource Graph query against rg-prod-eus",
+        "Does not deploy or modify Azure resources",
+        "Runs build_diagram.py and returns Mermaid plus diagram.drawio",
+        "Summarizes network, compute, and data resources and lists unlinked resources separately"
+      ]
+    },
+    {
+      "name": "export_json",
+      "input": "Here is an az graph export of rg-app. Build an infrastructure diagram from this JSON.",
+      "assertions": [
+        "Skips az login and uses the supplied JSON as build_diagram.py input",
+        "Expands nested VNet subnets when they are not separate rows",
+        "Edges only connect resource IDs present in the export",
+        "Writes inventory.md with relationship labels from property names"
+      ]
+    },
+    {
+      "name": "empty_and_oversize",
+      "input": "Map every resource in subscription 00000000-0000-0000-0000-000000000000 as an architecture diagram.",
+      "assertions": [
+        "Does not draw every NIC on one subscription canvas by default",
+        "Produces one diagram per resource group or a resource-group overview if the user insists on subscription scope",
+        "Pages Resource Graph when skip_token is present",
+        "Splits a resource group diagram when it exceeds 80 resources"
+      ]
+    }
+  ]
+}

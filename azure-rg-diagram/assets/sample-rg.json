@@ -1,0 +1,134 @@
+{
+  "data": [
+    {
+      "id": "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/virtualNetworks/vnet-app",
+      "name": "vnet-app",
+      "type": "Microsoft.Network/virtualNetworks",
+      "location": "eastus",
+      "resourceGroup": "rg-prod",
+      "properties": {
+        "addressSpace": {"addressPrefixes": ["10.20.0.0/16"]},
+        "subnets": [
+          {
+            "name": "snet-web",
+            "id": "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/virtualNetworks/vnet-app/subnets/snet-web",
+            "properties": {
+              "addressPrefix": "10.20.1.0/24",
+              "networkSecurityGroup": {
+                "id": "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/networkSecurityGroups/nsg-web"
+              }
+            }
+          },
+          {
+            "name": "snet-data",
+            "id": "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/virtualNetworks/vnet-app/subnets/snet-data",
+            "properties": {"addressPrefix": "10.20.2.0/24"}
+          }
+        ]
+      }
+    },
+    {
+      "id": "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/networkSecurityGroups/nsg-web",
+      "name": "nsg-web",
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "location": "eastus",
+      "resourceGroup": "rg-prod",
+      "properties": {}
+    },
+    {
+      "id": "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/publicIPAddresses/pip-lb",
+      "name": "pip-lb",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "location": "eastus",
+      "resourceGroup": "rg-prod",
+      "properties": {"ipAddress": "20.1.2.3"}
+    },
+    {
+      "id": "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/loadBalancers/lb-web",
+      "name": "lb-web",
+      "type": "Microsoft.Network/loadBalancers",
+      "location": "eastus",
+      "resourceGroup": "rg-prod",
+      "properties": {
+        "frontendIPConfigurations": [
+          {
+            "properties": {
+              "publicIPAddress": {
+                "id": "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/publicIPAddresses/pip-lb"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/networkInterfaces/nic-web-01",
+      "name": "nic-web-01",
+      "type": "Microsoft.Network/networkInterfaces",
+      "location": "eastus",
+      "resourceGroup": "rg-prod",
+      "properties": {
+        "ipConfigurations": [
+          {
+            "properties": {
+              "subnet": {
+                "id": "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/virtualNetworks/vnet-app/subnets/snet-web"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+      "name": "vm-web-01",
+      "type": "Microsoft.Compute/virtualMachines",
+      "location": "eastus",
+      "resourceGroup": "rg-prod",
+      "properties": {
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/networkInterfaces/nic-web-01"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Sql/servers/sql-app",
+      "name": "sql-app",
+      "type": "Microsoft.Sql/servers",
+      "location": "eastus",
+      "resourceGroup": "rg-prod",
+      "properties": {}
+    },
+    {
+      "id": "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/privateEndpoints/pe-sql",
+      "name": "pe-sql",
+      "type": "Microsoft.Network/privateEndpoints",
+      "location": "eastus",
+      "resourceGroup": "rg-prod",
+      "properties": {
+        "subnet": {
+          "id": "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/virtualNetworks/vnet-app/subnets/snet-data"
+        },
+        "privateLinkServiceConnections": [
+          {
+            "properties": {
+              "privateLinkServiceId": "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Sql/servers/sql-app"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.KeyVault/vaults/kv-app",
+      "name": "kv-app",
+      "type": "Microsoft.KeyVault/vaults",
+      "location": "eastus",
+      "resourceGroup": "rg-prod",
+      "properties": {}
+    }
+  ]
+}
