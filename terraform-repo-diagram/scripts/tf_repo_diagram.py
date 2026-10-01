@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Build an infrastructure diagram from Terraform in a GitHub repo.
 
-The script stays in this repo. Pass a target repo link each run.
-
 Usage:
-  python3 terraform-repo-diagram/scripts/tf_repo_diagram.py --repo https://github.com/owner/repo
-  python3 terraform-repo-diagram/scripts/tf_repo_diagram.py --repo owner/repo --ref main --out ./out
-  python3 terraform-repo-diagram/scripts/tf_repo_diagram.py
+  python3 tf_repo_diagram.py --repo https://github.com/owner/repo
+  python3 tf_repo_diagram.py --repo owner/repo --ref main --out ./out
+  python3 tf_repo_diagram.py          # prompts for the target repo link
 """
 
 from __future__ import annotations
@@ -18,6 +16,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from collections import defaultdict
 from pathlib import Path
@@ -29,8 +28,8 @@ TF_EXTS = {".tf", ".tf.json"}
 CATEGORY = [
     ("network", ("virtual_network", "subnet", "network_security", "route", "public_ip",
                  "lb", "application_gateway", "nat_gateway", "firewall", "dns",
-                 "private_endpoint", "private_dns", "vpc", "security_group",
-                 "route_table", "internet_gateway", "load_balancer",
+                 "private_endpoint", "private_dns", "vpc", "subnet", "security_group",
+                 "route_table", "internet_gateway", "nat_gateway", "load_balancer",
                  "lb_listener", "network_interface")),
     ("compute", ("virtual_machine", "linux_virtual_machine", "windows_virtual_machine",
                  "vmss", "aks", "kubernetes", "app_service", "function_app", "container",
@@ -55,6 +54,7 @@ def category_of(resource_type: str) -> str:
 def parse_repo(raw: str) -> tuple[str, str, str | None, str | None]:
     raw = raw.strip().rstrip("/")
     if raw.startswith("git@"):
+        # git@github.com:owner/repo.git
         body = raw.split(":", 1)[-1]
         body = body[:-4] if body.endswith(".git") else body
         owner, repo = body.split("/", 1)
@@ -78,9 +78,6 @@ def parse_repo(raw: str) -> tuple[str, str, str | None, str | None]:
 
 def clone_repo(owner: str, repo: str, ref: str | None, dest: Path) -> None:
     url = f"https://github.com/{owner}/{repo}.git"
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if token:
-        url = f"https://x-access-token:{token}@github.com/{owner}/{repo}.git"
     cmd = ["git", "clone", "--depth", "1"]
     if ref:
         cmd += ["--branch", ref]
@@ -89,11 +86,10 @@ def clone_repo(owner: str, repo: str, ref: str | None, dest: Path) -> None:
     env["GIT_TERMINAL_PROMPT"] = "0"
     proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if proc.returncode != 0:
-        err = proc.stderr or proc.stdout
-        err = err.replace(token, "***") if token else err
         raise SystemExit(
             "Clone failed. Public repos work without a token. "
-            "For private repos set GITHUB_TOKEN and retry.\n" + err
+            "For private repos set GITHUB_TOKEN and retry.\n"
+            + (proc.stderr or proc.stdout)
         )
 
 
@@ -111,11 +107,12 @@ def iter_tf_files(root: Path, subpath: str | None) -> list[Path]:
 def strip_comments(text: str) -> str:
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
     text = re.sub(r"(?m)#.*?$", "", text)
-    text = re.sub(r"(?m)(?<!\$)(?<![\\])//.*?$", "", text)
+    text = re.sub(r'(?m)(?<!\$)(?<![\\])//.*?$', "", text)
     return text
 
 
 def blocks(text: str) -> list[tuple[str, str]]:
+    """Return (header, body) for top-level HCL blocks."""
     text = strip_comments(text)
     out = []
     i = 0
@@ -255,18 +252,29 @@ def edges_of(model: dict) -> list[dict]:
     return edges
 
 
+def label(node: dict) -> str:
+    attrs = node.get("attrs") or {}
+    bits = [node["id"]]
+    if attrs.get("name"):
+        bits.append(attrs["name"])
+    if attrs.get("location"):
+        bits.append(attrs["location"])
+    if attrs.get("sku_name") or attrs.get("sku") or attrs.get("vm_size") or attrs.get("size"):
+        bits.append(attrs.get("sku_name") or attrs.get("sku") or attrs.get("vm_size") or attrs.get("size"))
+    if attrs.get("account_tier"):
+        bits.append(f"{attrs['account_tier']}/{attrs.get('account_replication_type', '')}".rstrip("/"))
+    if attrs.get("source"):
+        bits.append(attrs["source"])
+    return " | ".join(bits)
+
+
 def write_inventory(model: dict, edges: list[dict], out: Path, title: str) -> None:
-    lines = [
-        f"# {title}",
-        "",
-        f"- Providers: {', '.join(p['name'] for p in model['providers']) or 'none declared'}",
-        f"- Resources: {len(model['resources'])}",
-        f"- Modules: {len(model['modules'])}",
-        f"- Reference edges: {len(edges)}",
-        "",
-        "| Resource | Category | Config | File |",
-        "|---|---|---|---|",
-    ]
+    lines = [f"# {title}", "", f"- Providers: {', '.join(p['name'] for p in model['providers']) or 'none declared'}",
+             f"- Resources: {len(model['resources'])}",
+             f"- Modules: {len(model['modules'])}",
+             f"- Reference edges: {len(edges)}", ""]
+    lines.append("| Resource | Category | Config | File |")
+    lines.append("|---|---|---|---|")
     for r in model["resources"]:
         cfg = ", ".join(f"{k}={v}" for k, v in r["attrs"].items()) or "-"
         lines.append(f"| `{r['id']}` | {r['category']} | {cfg} | `{r['file']}` |")
@@ -277,8 +285,46 @@ def write_inventory(model: dict, edges: list[dict], out: Path, title: str) -> No
     if edges:
         lines += ["", "## Edges", ""]
         for e in edges:
-            lines.append(f"- `{e['from']}` \u2192 `{e['to']}`")
+            lines.append(f"- `{e['from']}` → `{e['to']}`")
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+ICON_BASE = "https://cdn.jsdelivr.net/gh/jgraph/drawio@dev/src/main/webapp/img/lib/azure2"
+ICONS = {
+    "azurerm_resource_group": "general/Resource_Groups.svg",
+    "azurerm_storage_account": "storage/Storage_Accounts.svg",
+    "azurerm_storage_container": "storage/Storage_Accounts.svg",
+    "azurerm_virtual_network": "networking/Virtual_Networks.svg",
+    "azurerm_subnet": "networking/Subnet.svg",
+    "azurerm_network_security_group": "networking/Network_Security_Groups.svg",
+    "azurerm_public_ip": "networking/Public_IP_Addresses.svg",
+    "azurerm_lb": "networking/Load_Balancers.svg",
+    "azurerm_network_interface": "networking/Network_Interfaces.svg",
+    "azurerm_private_endpoint": "networking/Private_Endpoint.svg",
+    "azurerm_linux_virtual_machine": "compute/Virtual_Machine.svg",
+    "azurerm_windows_virtual_machine": "compute/Virtual_Machine.svg",
+    "azurerm_virtual_machine": "compute/Virtual_Machine.svg",
+    "azurerm_key_vault": "security/Key_Vaults.svg",
+    "azurerm_mssql_server": "databases/SQL_Server.svg",
+    "azurerm_kubernetes_cluster": "compute/Kubernetes_Services.svg",
+    "azurerm_app_service": "app%20services/App_Services.svg",
+    "azurerm_linux_web_app": "app%20services/App_Services.svg",
+    "azurerm_function_app": "compute/Function_Apps.svg",
+}
+CATEGORY_ICON = {
+    "network": "networking/Virtual_Networks.svg",
+    "compute": "compute/Virtual_Machine.svg",
+    "data": "storage/Storage_Accounts.svg",
+    "security": "security/Key_Vaults.svg",
+    "integration": "integration/Service_Bus.svg",
+    "module": "general/Resource_Groups.svg",
+    "other": "general/Resource_Groups.svg",
+}
+
+
+def icon_for(node: dict) -> str:
+    path = ICONS.get(node.get("type") or "") or CATEGORY_ICON.get(node.get("category"), CATEGORY_ICON["other"])
+    return f"{ICON_BASE}/{path}"
 
 
 def write_html(model: dict, edges: list[dict], out: Path, title: str) -> None:
@@ -288,65 +334,92 @@ def write_html(model: dict, edges: list[dict], out: Path, title: str) -> None:
     for m in model["modules"]:
         groups["module"].append({**m, "category": "module", "type": "module"})
     order = ["network", "compute", "data", "security", "integration", "module", "other"]
-    colors = {
-        "network": "#d6e8ff", "compute": "#d9f2e6", "data": "#fff1cc",
-        "security": "#fde2e2", "integration": "#efe4ff", "module": "#e7e7e7", "other": "#f4f4f4",
+    accents = {
+        "network": "#5C2D91", "compute": "#0078D4", "data": "#008272",
+        "security": "#D83B01", "integration": "#0078D4", "module": "#5E5E5E", "other": "#0078D4",
     }
-    col_w, box_h, gap_y, pad = 300, 92, 16, 24
-    nodes = []
-    positions = {}
-    x = pad
-    max_rows = 1
+    sections = []
+    id_map = {}
+    n = 0
     for cat in order:
         items = groups.get(cat) or []
         if not items:
             continue
-        y = 70
+        cards = []
         for item in items:
-            positions[item["id"]] = (x, y)
-            nodes.append((item, x, y, colors.get(cat, "#f4f4f4"), cat))
-            y += box_h + gap_y
-        max_rows = max(max_rows, len(items))
-        x += col_w + 48
-    width = max(x + pad, 640)
-    height = 90 + max_rows * (box_h + gap_y) + 40
-
-    edge_svg = []
-    for e in edges:
-        if e["from"] not in positions or e["to"] not in positions:
-            continue
-        x1, y1 = positions[e["from"]]
-        x2, y2 = positions[e["to"]]
-        edge_svg.append(
-            f'<line x1="{x1 + col_w}" y1="{y1 + box_h / 2}" x2="{x2}" y2="{y2 + box_h / 2}" '
-            'stroke="#5b6b7c" stroke-width="1.4" marker-end="url(#arrow)"/>'
+            nid = f"n{n}"
+            id_map[item["id"]] = nid
+            n += 1
+            attrs = item.get("attrs") or {}
+            detail = html.escape(" · ".join(f"{k}={v}" for k, v in list(attrs.items())[:3]) or item.get("file", ""))
+            cards.append(
+                f'<article class="card" id="{nid}" data-node="{nid}">'
+                f'<img alt="" src="{html.escape(icon_for(item))}"/>'
+                f'<strong>{html.escape(item["id"])}</strong>'
+                f'<span>{detail}</span></article>'
+            )
+        sections.append(
+            f'<section class="col" style="--accent:{accents[cat]}"><h2>{html.escape(cat)}</h2>{"".join(cards)}</section>'
         )
-    box_svg = []
-    for item, bx, by, fill, cat in nodes:
-        attrs = item.get("attrs") or {}
-        title_line = html.escape(item["id"])
-        detail = html.escape(
-            " \u00b7 ".join(f"{k}={v}" for k, v in list(attrs.items())[:4]) or item.get("file", "")
-        )
-        box_svg.append(
-            f'<g><rect x="{bx}" y="{by}" width="{col_w}" height="{box_h}" rx="8" '
-            f'fill="{fill}" stroke="#31475e"/>'
-            f'<text x="{bx + 12}" y="{by + 22}" font-size="11" fill="#5b6b7c">{html.escape(cat)}</text>'
-            f'<text x="{bx + 12}" y="{by + 44}" font-size="13" font-weight="600" fill="#1b2838">{title_line}</text>'
-            f'<text x="{bx + 12}" y="{by + 66}" font-size="11" fill="#31475e">{detail}</text></g>'
-        )
+    edge_js = json.dumps([
+        {"from": id_map[e["from"]], "to": id_map[e["to"]]}
+        for e in edges if e["from"] in id_map and e["to"] in id_map
+    ])
     page = f'''<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>{html.escape(title)}</title>
-<style>body{{font-family:Segoe UI,sans-serif;margin:24px;color:#1b2838}}
-h1{{font-size:20px}} .meta{{color:#5b6b7c;margin-bottom:12px}}</style></head>
+<style>
+body {{ margin: 0; font-family: "Segoe UI", sans-serif; background: #f3f2f1; color: #201f1e; }}
+header {{ padding: 20px 28px 8px; }}
+h1 {{ margin: 0; color: #0078d4; font-size: 22px; }}
+p {{ margin: 6px 0 0; color: #605e5c; }}
+#board {{ position: relative; margin: 16px; padding: 18px; background: #fff; border: 2px solid #0078d4; border-radius: 12px; }}
+.cols {{ display: flex; gap: 28px; align-items: flex-start; position: relative; z-index: 1; }}
+.col {{ min-width: 220px; }}
+.col h2 {{ margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); }}
+.card {{ width: 200px; margin: 0 0 22px; text-align: center; }}
+.card img {{ width: 52px; height: 52px; }}
+.card strong, .card span {{ display: block; }}
+.card strong {{ font-size: 13px; }}
+.card span {{ font-size: 11px; color: #605e5c; }}
+svg.links {{ position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }}
+</style></head>
 <body>
-<h1>{html.escape(title)}</h1>
-<p class="meta">{len(model["resources"])} resources \u00b7 {len(model["modules"])} modules \u00b7 {len(edges)} reference edges. Lines are Terraform references, not guessed traffic.</p>
-<svg width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg">
-<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6" fill="#5b6b7c"/></marker></defs>
-{''.join(edge_svg)}
-{''.join(box_svg)}
-</svg>
+<header>
+  <h1>{html.escape(title)}</h1>
+  <p>Azure architecture icons. {len(model["resources"])} resources · {len(model["modules"])} modules · {len(edges)} reference edges. Lines are Terraform references, not guessed traffic.</p>
+</header>
+<div id="board">
+  <svg class="links" id="links"></svg>
+  <div class="cols">{"".join(sections)}</div>
+</div>
+<script>
+const edges = {edge_js};
+function draw() {{
+  const board = document.getElementById("board");
+  const svg = document.getElementById("links");
+  const rect = board.getBoundingClientRect();
+  svg.setAttribute("viewBox", `0 0 ${{board.clientWidth}} ${{board.clientHeight}}`);
+  svg.innerHTML = '<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6" fill="#0078D4"/></marker></defs>';
+  for (const edge of edges) {{
+    const a = document.getElementById(edge.from).getBoundingClientRect();
+    const b = document.getElementById(edge.to).getBoundingClientRect();
+    const x1 = a.left + a.width / 2 - rect.left;
+    const y1 = a.top + 26 - rect.top;
+    const x2 = b.left + b.width / 2 - rect.left;
+    const y2 = b.top + 26 - rect.top;
+    const mid = (x1 + x2) / 2;
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", `M ${{x1}} ${{y1}} C ${{mid}} ${{y1}}, ${{mid}} ${{y2}}, ${{x2}} ${{y2}}`);
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "#0078D4");
+    path.setAttribute("stroke-width", "1.4");
+    path.setAttribute("marker-end", "url(#arrow)");
+    svg.appendChild(path);
+  }}
+}}
+window.addEventListener("load", draw);
+window.addEventListener("resize", draw);
+</script>
 </body></html>'''
     out.write_text(page, encoding="utf-8")
 
@@ -370,14 +443,8 @@ def build(repo_link: str, ref: str | None, out_dir: Path, title: str | None) -> 
         (out_dir / "model.json").write_text(json.dumps({"model": model, "edges": edges}, indent=2), encoding="utf-8")
         write_inventory(model, edges, out_dir / "inventory.md", title)
         write_html(model, edges, out_dir / "diagram.html", title)
-        return {
-            "title": title,
-            "resources": len(model["resources"]),
-            "modules": len(model["modules"]),
-            "edges": len(edges),
-            "files": len(files),
-            "out": str(out_dir),
-        }
+        return {"title": title, "resources": len(model["resources"]), "modules": len(model["modules"]),
+                "edges": len(edges), "files": len(files), "out": str(out_dir)}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
