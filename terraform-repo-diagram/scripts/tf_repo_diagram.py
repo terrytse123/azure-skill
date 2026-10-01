@@ -330,98 +330,100 @@ def icon_for(node: dict) -> str:
 def write_html(model: dict, edges: list[dict], out: Path, title: str) -> None:
     groups = defaultdict(list)
     for r in model["resources"]:
-        groups[r["category"]].append(r)
+        cat = "foundation" if r["type"].endswith("resource_group") else r["category"]
+        groups[cat].append(r)
     for m in model["modules"]:
         groups["module"].append({**m, "category": "module", "type": "module"})
-    order = ["network", "compute", "data", "security", "integration", "module", "other"]
+    order = ["foundation", "network", "compute", "data", "security", "integration", "module", "other"]
     accents = {
-        "network": "#5C2D91", "compute": "#0078D4", "data": "#008272",
-        "security": "#D83B01", "integration": "#0078D4", "module": "#5E5E5E", "other": "#0078D4",
+        "foundation": "#0078D4", "network": "#5C2D91", "compute": "#0078D4", "data": "#008272",
+        "security": "#D83B01", "integration": "#0078D4", "module": "#5E5E5E", "other": "#605E5C",
     }
-    sections = []
-    id_map = {}
-    n = 0
+    col_w, box_h, gap_x, gap_y, pad_x, pad_y = 280, 196, 70, 28, 36, 78
+    positions = {}
+    nodes = []
+    x = pad_x
+    max_rows = 1
     for cat in order:
         items = groups.get(cat) or []
         if not items:
             continue
-        cards = []
+        y = pad_y
         for item in items:
-            nid = f"n{n}"
-            id_map[item["id"]] = nid
-            n += 1
-            attrs = item.get("attrs") or {}
-            detail = html.escape(" · ".join(f"{k}={v}" for k, v in list(attrs.items())[:3]) or item.get("file", ""))
-            cards.append(
-                f'<article class="card" id="{nid}" data-node="{nid}">'
-                f'<img alt="" src="{html.escape(icon_for(item))}"/>'
-                f'<strong>{html.escape(item["id"])}</strong>'
-                f'<span>{detail}</span></article>'
-            )
-        sections.append(
-            f'<section class="col" style="--accent:{accents[cat]}"><h2>{html.escape(cat)}</h2>{"".join(cards)}</section>'
+            positions[item["id"]] = (x, y, cat)
+            nodes.append(item)
+            y += box_h + gap_y
+        max_rows = max(max_rows, len(items))
+        x += col_w + gap_x
+    width = max(x + pad_x - gap_x, 720)
+    height = pad_y + max_rows * (box_h + gap_y) + 24
+
+    def wrap(value: str, limit: int = 36) -> list[str]:
+        words = value.split()
+        lines, cur = [], ""
+        for word in words:
+            trial = word if not cur else cur + " " + word
+            if len(trial) <= limit:
+                cur = trial
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = word
+        if cur:
+            lines.append(cur)
+        return lines[:3]
+
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        "<defs><marker id='arrow' markerWidth='8' markerHeight='8' refX='7' refY='3' orient='auto'><path d='M0,0 L7,3 L0,6' fill='#0078D4'/></marker></defs>",
+        f"<rect width='{width}' height='{height}' fill='#ffffff'/>",
+    ]
+    for e in edges:
+        if e["from"] not in positions or e["to"] not in positions:
+            continue
+        x1, y1, _ = positions[e["from"]]
+        x2, y2, _ = positions[e["to"]]
+        # connect icon centers, not the text block
+        sx, sy = x1 + col_w - 16, y1 + 48
+        tx, ty = x2 + 16, y2 + 48
+        mid = (sx + tx) / 2
+        parts.append(
+            f"<path d='M {sx} {sy} C {mid} {sy}, {mid} {ty}, {tx} {ty}' fill='none' stroke='#0078D4' stroke-width='1.6' marker-end='url(#arrow)'/>"
         )
-    edge_js = json.dumps([
-        {"from": id_map[e["from"]], "to": id_map[e["to"]]}
-        for e in edges if e["from"] in id_map and e["to"] in id_map
-    ])
-    page = f'''<!DOCTYPE html>
+    for item in nodes:
+        bx, by, cat = positions[item["id"]]
+        attrs = item.get("attrs") or {}
+        name = attrs.get("name") or item["id"]
+        config = [f"{k}: {v}" for k, v in list(attrs.items())[:3] if k != "name"]
+        parts.append(f"<rect x='{bx}' y='{by}' width='{col_w}' height='{box_h}' rx='10' fill='#f3f2f1' stroke='{accents.get(cat, '#0078D4')}' stroke-width='1.5'/>")
+        parts.append(f"<image href='{html.escape(icon_for(item))}' x='{bx + (col_w - 56) / 2}' y='{by + 16}' width='56' height='56'/>")
+        parts.append(f"<text x='{bx + col_w / 2}' y='{by + 92}' text-anchor='middle' font-family='Segoe UI, Arial, sans-serif' font-size='14' font-weight='600' fill='#201f1e'>{html.escape(name)}</text>")
+        parts.append(f"<text x='{bx + col_w / 2}' y='{by + 112}' text-anchor='middle' font-family='Segoe UI, Arial, sans-serif' font-size='11' fill='#605e5c'>{html.escape(item['id'])}</text>")
+        ty = by + 134
+        for line in config:
+            for piece in wrap(line, 38):
+                parts.append(f"<text x='{bx + col_w / 2}' y='{ty}' text-anchor='middle' font-family='Segoe UI, Arial, sans-serif' font-size='11' fill='#323130'>{html.escape(piece)}</text>")
+                ty += 15
+    parts.append("</svg>")
+    svg = "".join(parts)
+    page = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>{html.escape(title)}</title>
 <style>
-body {{ margin: 0; font-family: "Segoe UI", sans-serif; background: #f3f2f1; color: #201f1e; }}
-header {{ padding: 20px 28px 8px; }}
+body {{ margin: 0; font-family: Segoe UI, Arial, sans-serif; background: #f3f2f1; color: #201f1e; }}
+header {{ padding: 20px 28px 0; }}
 h1 {{ margin: 0; color: #0078d4; font-size: 22px; }}
-p {{ margin: 6px 0 0; color: #605e5c; }}
-#board {{ position: relative; margin: 16px; padding: 18px; background: #fff; border: 2px solid #0078d4; border-radius: 12px; }}
-.cols {{ display: flex; gap: 28px; align-items: flex-start; position: relative; z-index: 1; }}
-.col {{ min-width: 220px; }}
-.col h2 {{ margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); }}
-.card {{ width: 200px; margin: 0 0 22px; text-align: center; }}
-.card img {{ width: 52px; height: 52px; }}
-.card strong, .card span {{ display: block; }}
-.card strong {{ font-size: 13px; }}
-.card span {{ font-size: 11px; color: #605e5c; }}
-svg.links {{ position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }}
+p {{ margin: 6px 0 12px; color: #605e5c; }}
 </style></head>
 <body>
 <header>
   <h1>{html.escape(title)}</h1>
-  <p>Azure architecture icons. {len(model["resources"])} resources · {len(model["modules"])} modules · {len(edges)} reference edges. Lines are Terraform references, not guessed traffic.</p>
+  <p>Azure architecture icons sit above each resource name. Lines are Terraform references, not guessed traffic.</p>
 </header>
-<div id="board">
-  <svg class="links" id="links"></svg>
-  <div class="cols">{"".join(sections)}</div>
-</div>
-<script>
-const edges = {edge_js};
-function draw() {{
-  const board = document.getElementById("board");
-  const svg = document.getElementById("links");
-  const rect = board.getBoundingClientRect();
-  svg.setAttribute("viewBox", `0 0 ${{board.clientWidth}} ${{board.clientHeight}}`);
-  svg.innerHTML = '<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6" fill="#0078D4"/></marker></defs>';
-  for (const edge of edges) {{
-    const a = document.getElementById(edge.from).getBoundingClientRect();
-    const b = document.getElementById(edge.to).getBoundingClientRect();
-    const x1 = a.left + a.width / 2 - rect.left;
-    const y1 = a.top + 26 - rect.top;
-    const x2 = b.left + b.width / 2 - rect.left;
-    const y2 = b.top + 26 - rect.top;
-    const mid = (x1 + x2) / 2;
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", `M ${{x1}} ${{y1}} C ${{mid}} ${{y1}}, ${{mid}} ${{y2}}, ${{x2}} ${{y2}}`);
-    path.setAttribute("fill", "none");
-    path.setAttribute("stroke", "#0078D4");
-    path.setAttribute("stroke-width", "1.4");
-    path.setAttribute("marker-end", "url(#arrow)");
-    svg.appendChild(path);
-  }}
-}}
-window.addEventListener("load", draw);
-window.addEventListener("resize", draw);
-</script>
-</body></html>'''
+{svg}
+</body></html>"""
     out.write_text(page, encoding="utf-8")
+    out.with_suffix(".svg").write_text(svg, encoding="utf-8")
+
 
 
 def build(repo_link: str, ref: str | None, out_dir: Path, title: str | None) -> dict:
