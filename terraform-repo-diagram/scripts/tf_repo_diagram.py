@@ -426,6 +426,73 @@ p {{ margin: 6px 0 12px; color: #605e5c; }}
 
 
 
+
+ARM = {
+    "azurerm_resource_group": "Microsoft.Resources/resourceGroups",
+    "azurerm_storage_account": "Microsoft.Storage/storageAccounts",
+    "azurerm_virtual_network": "Microsoft.Network/virtualNetworks",
+    "azurerm_subnet": "Microsoft.Network/subnets",
+    "azurerm_network_security_group": "Microsoft.Network/networkSecurityGroups",
+    "azurerm_public_ip": "Microsoft.Network/publicIPAddresses",
+    "azurerm_lb": "Microsoft.Network/loadBalancers",
+    "azurerm_network_interface": "Microsoft.Network/networkInterfaces",
+    "azurerm_private_endpoint": "Microsoft.Network/privateEndpoints",
+    "azurerm_linux_virtual_machine": "Microsoft.Compute/virtualMachines",
+    "azurerm_windows_virtual_machine": "Microsoft.Compute/virtualMachines",
+    "azurerm_virtual_machine": "Microsoft.Compute/virtualMachines",
+    "azurerm_key_vault": "Microsoft.KeyVault/vaults",
+    "azurerm_mssql_server": "Microsoft.Sql/servers",
+    "azurerm_kubernetes_cluster": "Microsoft.ContainerService/managedClusters",
+}
+
+
+def arm_type(tf_type: str) -> str:
+    if tf_type in ARM:
+        return ARM[tf_type]
+    tail = tf_type.split("_", 1)[-1]
+    return "Microsoft.Resources/" + tail
+
+
+def dashboard_payload(model: dict, edges: list[dict]) -> dict:
+    groups = {r["name"]: r["attrs"].get("name", r["name"]) for r in model["resources"] if r["type"].endswith("resource_group")}
+    rows = []
+    for r in model["resources"]:
+        attrs = r.get("attrs") or {}
+        rg = attrs.get("resource_group_name") or next(iter(groups.values()), "unknown")
+        if rg.startswith("azurerm_"):
+            rg = groups.get(rg.split(".")[1], rg)
+        name = attrs.get("name") or r["name"]
+        rid = f"/subscriptions/terraform/resourceGroups/{rg}"
+        if not r["type"].endswith("resource_group"):
+            rid += f"/providers/{arm_type(r['type'])}/{name}"
+        props = {k: v for k, v in attrs.items() if k not in {"resource_group_name"}}
+        if r["type"].endswith("storage_account") and "publicNetworkAccess" not in props:
+            props["publicNetworkAccess"] = "Enabled"
+        rows.append({
+            "id": rid,
+            "name": name,
+            "type": arm_type(r["type"]),
+            "location": attrs.get("location", ""),
+            "resourceGroup": rg,
+            "properties": props,
+            "terraform": r["id"],
+            "file": r["file"],
+        })
+    return {"data": rows, "source": model.get("repo"), "files": model.get("files", [])}
+
+
+def write_dashboard(model: dict, edges: list[dict], out: Path, title: str) -> None:
+    template = Path("/workspace/artifacts/azure-dashboard.html")
+    if not template.exists():
+        template = Path(__file__).resolve().parents[1] / "azure-dashboard" / "index.html"
+    page = template.read_text(encoding="utf-8")
+    payload = json.dumps(dashboard_payload(model, edges))
+    page = page.replace("load(SAMPLE, \"rg-prod sample\");", f"load({payload}, {json.dumps(title)});")
+    page = page.replace("<title>Azure resource dashboard</title>", f"<title>{html.escape(title)} dashboard</title>")
+    page = page.replace("<h1>Azure resource dashboard</h1>", f"<h1>{html.escape(title)}</h1>")
+    out.write_text(page, encoding="utf-8")
+
+
 def build(repo_link: str, ref: str | None, out_dir: Path, title: str | None) -> dict:
     owner, repo, url_ref, subpath = parse_repo(repo_link)
     ref = ref or url_ref
@@ -445,6 +512,7 @@ def build(repo_link: str, ref: str | None, out_dir: Path, title: str | None) -> 
         (out_dir / "model.json").write_text(json.dumps({"model": model, "edges": edges}, indent=2), encoding="utf-8")
         write_inventory(model, edges, out_dir / "inventory.md", title)
         write_html(model, edges, out_dir / "diagram.html", title)
+        write_dashboard(model, edges, out_dir / "dashboard.html", title)
         return {"title": title, "resources": len(model["resources"]), "modules": len(model["modules"]),
                 "edges": len(edges), "files": len(files), "out": str(out_dir)}
     finally:
