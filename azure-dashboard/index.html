@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Azure resource dashboard</title>
+<style>
+  :root {
+    --bg: #f3f2f1; --card: #fff; --ink: #201f1e; --muted: #605e5c;
+    --line: #e1dfdd; --blue: #0078d4; --high: #d83b01; --med: #ca5010; --ok: #107c10;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; background: var(--bg); color: var(--ink); }
+  header { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 16px 22px; background: #fff; border-bottom: 1px solid var(--line); }
+  h1 { margin: 0; font-size: 20px; color: var(--blue); }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  .tools { display: flex; gap: 8px; align-items: center; }
+  button, select, input[type="search"] { border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 7px 10px; font: inherit; }
+  button.primary { background: var(--blue); color: #fff; border-color: var(--blue); cursor: pointer; }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 14px 22px 0; }
+  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .kpi b { display: block; font-size: 22px; }
+  .kpi span { color: var(--muted); font-size: 12px; }
+  main { display: grid; grid-template-columns: 280px 1fr 320px; gap: 12px; padding: 14px 22px 22px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-height: 420px; }
+  h2 { margin: 0 0 10px; font-size: 14px; }
+  .res { display: flex; gap: 8px; align-items: center; padding: 8px; border-radius: 8px; cursor: pointer; }
+  .res:hover, .res.on { background: #eff6fc; }
+  .res img { width: 28px; height: 28px; }
+  .res b { display: block; font-size: 13px; }
+  .res span { color: var(--muted); font-size: 11px; }
+  .issue { border-left: 4px solid var(--med); padding: 8px 10px; margin: 0 0 8px; background: #fff8f5; border-radius: 6px; }
+  .issue.high { border-color: var(--high); }
+  .issue.info { border-color: var(--blue); background: #f3f9fd; }
+  .issue.ok { border-color: var(--ok); background: #f3faf3; }
+  .issue b { display: block; font-size: 13px; }
+  .issue span { font-size: 12px; color: #3b3a39; }
+  #board { position: relative; overflow: auto; min-height: 460px; }
+  svg.links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .cols { display: flex; gap: 18px; position: relative; z-index: 1; }
+  .col { min-width: 150px; }
+  .col h3 { margin: 0 0 8px; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--blue); }
+  .node { width: 140px; text-align: center; margin: 0 0 16px; cursor: pointer; }
+  .node img { width: 42px; height: 42px; }
+  .node b, .node span { display: block; }
+  .node b { font-size: 12px; }
+  .node span { font-size: 10px; color: var(--muted); }
+  .node.on { outline: 2px solid var(--blue); border-radius: 8px; }
+  dl { margin: 0; }
+  dt { color: var(--muted); font-size: 11px; margin-top: 8px; }
+  dd { margin: 2px 0 0; font-size: 13px; }
+  canvas { width: 100%; height: 92px; background: #faf9f8; border-radius: 6px; }
+  .note { color: var(--muted); font-size: 12px; }
+  @media (max-width: 980px) { main, .kpis { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Azure resource dashboard</h1>
+    <p id="scope">Config, usage, and connectivity checks. Lines are resource-id references.</p>
+  </div>
+  <div class="tools">
+    <input id="q" type="search" placeholder="Filter resources"/>
+    <select id="set"><option value="sample">rg-prod sample</option><option value="tf">ai_model Terraform</option></select>
+    <button id="load" class="primary">Load export</button>
+    <input id="file" type="file" accept="application/json" hidden/>
+  </div>
+</header>
+<div class="kpis">
+  <div class="kpi"><b id="k-res">0</b><span>resources</span></div>
+  <div class="kpi"><b id="k-edge">0</b><span>connections</span></div>
+  <div class="kpi"><b id="k-high">0</b><span>connectivity issues</span></div>
+  <div class="kpi"><b id="k-use">sample</b><span>usage source</span></div>
+</div>
+<main>
+  <section>
+    <h2>Resources</h2>
+    <div id="list"></div>
+  </section>
+  <section>
+    <h2>Connectivity</h2>
+    <div id="board"><svg class="links" id="links"></svg><div class="cols" id="cols"></div></div>
+  </section>
+  <section>
+    <h2>Selected</h2>
+    <div id="detail" class="note">Select a resource.</div>
+    <h2 style="margin-top:16px">Usage</h2>
+    <canvas id="usage" width="560" height="180"></canvas>
+    <p class="note" id="usage-note">Sample 24h series. Drop a metrics export to replace it.</p>
+  </section>
+</main>
+<section style="margin: 0 22px 22px">
+  <h2>Connectivity checks</h2>
+  <div id="issues"></div>
+</section>
+<script>
+const ICON = "https://cdn.jsdelivr.net/gh/jgraph/drawio@dev/src/main/webapp/img/lib/azure2";
+const ICONS = {
+  "Microsoft.Network/virtualNetworks": ICON + "/networking/Virtual_Networks.svg",
+  "Microsoft.Network/subnets": ICON + "/networking/Subnet.svg",
+  "Microsoft.Network/networkSecurityGroups": ICON + "/networking/Network_Security_Groups.svg",
+  "Microsoft.Network/publicIPAddresses": ICON + "/networking/Public_IP_Addresses.svg",
+  "Microsoft.Network/loadBalancers": ICON + "/networking/Load_Balancers.svg",
+  "Microsoft.Network/networkInterfaces": ICON + "/networking/Network_Interfaces.svg",
+  "Microsoft.Network/privateEndpoints": ICON + "/networking/Private_Endpoint.svg",
+  "Microsoft.Compute/virtualMachines": ICON + "/compute/Virtual_Machine.svg",
+  "Microsoft.Sql/servers": ICON + "/databases/SQL_Server.svg",
+  "Microsoft.KeyVault/vaults": ICON + "/security/Key_Vaults.svg",
+  "Microsoft.Storage/storageAccounts": ICON + "/storage/Storage_Accounts.svg",
+  "Microsoft.Resources/resourceGroups": ICON + "/general/Resource_Groups.svg"
+};
+const LAYER = {
+  "Microsoft.Network/virtualNetworks": "network",
+  "Microsoft.Network/subnets": "network",
+  "Microsoft.Network/networkSecurityGroups": "network",
+  "Microsoft.Network/publicIPAddresses": "network",
+  "Microsoft.Network/loadBalancers": "network",
+  "Microsoft.Network/networkInterfaces": "network",
+  "Microsoft.Network/privateEndpoints": "network",
+  "Microsoft.Compute/virtualMachines": "compute",
+  "Microsoft.Sql/servers": "data",
+  "Microsoft.Storage/storageAccounts": "data",
+  "Microsoft.KeyVault/vaults": "security",
+  "Microsoft.Resources/resourceGroups": "foundation"
+};
+const SAMPLE = {"data":[
+  {"id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/virtualNetworks/vnet-app","name":"vnet-app","type":"Microsoft.Network/virtualNetworks","location":"eastus","resourceGroup":"rg-prod","properties":{"addressSpace":{"addressPrefixes":["10.20.0.0/16"]},"subnets":[{"name":"snet-web","id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/virtualNetworks/vnet-app/subnets/snet-web","properties":{"addressPrefix":"10.20.1.0/24","networkSecurityGroup":{"id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/networkSecurityGroups/nsg-web"}}},{"name":"snet-data","id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/virtualNetworks/vnet-app/subnets/snet-data","properties":{"addressPrefix":"10.20.2.0/24"}}]}},
+  {"id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/networkSecurityGroups/nsg-web","name":"nsg-web","type":"Microsoft.Network/networkSecurityGroups","location":"eastus","resourceGroup":"rg-prod","properties":{}},
+  {"id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/publicIPAddresses/pip-lb","name":"pip-lb","type":"Microsoft.Network/publicIPAddresses","location":"eastus","resourceGroup":"rg-prod","properties":{"ipAddress":"20.1.2.3"}},
+  {"id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/loadBalancers/lb-web","name":"lb-web","type":"Microsoft.Network/loadBalancers","location":"eastus","resourceGroup":"rg-prod","properties":{"frontendIPConfigurations":[{"properties":{"publicIPAddress":{"id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/publicIPAddresses/pip-lb"}}}]}},
+  {"id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/networkInterfaces/nic-web-01","name":"nic-web-01","type":"Microsoft.Network/networkInterfaces","location":"eastus","resourceGroup":"rg-prod","properties":{"ipConfigurations":[{"properties":{"subnet":{"id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/virtualNetworks/vnet-app/subnets/snet-web"}}}]}},
+  {"id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Compute/virtualMachines/vm-web-01","name":"vm-web-01","type":"Microsoft.Compute/virtualMachines","location":"eastus","resourceGroup":"rg-prod","properties":{"hardwareProfile":{"vmSize":"Standard_D2s_v3"},"networkProfile":{"networkInterfaces":[{"id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/networkInterfaces/nic-web-01"}]}}},
+  {"id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Sql/servers/sql-app","name":"sql-app","type":"Microsoft.Sql/servers","location":"eastus","resourceGroup":"rg-prod","properties":{"publicNetworkAccess":"Enabled"}},
+  {"id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/privateEndpoints/pe-sql","name":"pe-sql","type":"Microsoft.Network/privateEndpoints","location":"eastus","resourceGroup":"rg-prod","properties":{"subnet":{"id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Network/virtualNetworks/vnet-app/subnets/snet-data"},"privateLinkServiceConnections":[{"properties":{"privateLinkServiceId":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.Sql/servers/sql-app"}}]}},
+  {"id":"/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-prod/providers/Microsoft.KeyVault/vaults/kv-app","name":"kv-app","type":"Microsoft.KeyVault/vaults","location":"eastus","resourceGroup":"rg-prod","properties":{"publicNetworkAccess":"Enabled"}}
+]};
+const TF = {"data":[
+  {"id":"/subscriptions/demo/resourceGroups/example-resources","name":"example-resources","type":"Microsoft.Resources/resourceGroups","location":"westeurope","resourceGroup":"example-resources","properties":{}},
+  {"id":"/subscriptions/demo/resourceGroups/example-resources/providers/Microsoft.Storage/storageAccounts/storageaccountname","name":"storageaccountname","type":"Microsoft.Storage/storageAccounts","location":"westeurope","resourceGroup":"example-resources","properties":{"accountTier":"Standard","replication":"GRS","publicNetworkAccess":"Enabled"}}
+]};
+let resources = [], edges = [], selected = null, usageLive = false;
+
+function icon(type) { return ICONS[type] || ICON + "/general/Resource_Groups.svg"; }
+function expand(raw) {
+  const rows = (raw.data || raw.value || raw.resources || raw).slice();
+  const extra = [];
+  for (const r of rows) {
+    for (const sn of (r.properties && r.properties.subnets) || []) {
+      extra.push({id: sn.id, name: sn.name, type: "Microsoft.Network/subnets", location: r.location, resourceGroup: r.resourceGroup, properties: sn.properties || {}, parent: r.id});
+    }
+  }
+  return rows.concat(extra.filter(s => !rows.some(r => r.id === s.id)));
+}
+function collectIds(obj, into) {
+  if (!obj || typeof obj !== "object") return;
+  if (typeof obj.id === "string" && obj.id.startsWith("/subscriptions/")) into.add(obj.id);
+  for (const v of Object.values(obj)) collectIds(v, into);
+}
+function buildEdges(list) {
+  const ids = new Set(list.map(r => r.id));
+  const out = [];
+  for (const r of list) {
+    const refs = new Set();
+    collectIds(r.properties, refs);
+    refs.delete(r.id);
+    for (const ref of refs) if (ids.has(ref)) out.push({from: r.id, to: ref});
+  }
+  return out;
+}
+function checks(list) {
+  const byType = t => list.filter(r => r.type === t);
+  const issues = [];
+  for (const sn of byType("Microsoft.Network/subnets")) {
+    if (!(sn.properties.networkSecurityGroup || {}).id) {
+      issues.push({sev:"high", title: sn.name + " has no NSG", text: "Traffic to this subnet is not filtered. Attach a network security group before relying on the path."});
+    }
+  }
+  const peTargets = new Set();
+  for (const pe of byType("Microsoft.Network/privateEndpoints")) {
+    const conns = pe.properties.privateLinkServiceConnections || [];
+    for (const c of conns) peTargets.add((c.properties || {}).privateLinkServiceId);
+    if (!pe.properties.privateDnsZone) issues.push({sev:"medium", title: pe.name + " has no private DNS zone", text: "Clients may still resolve the public name. Link a private DNS zone for the target service."});
+  }
+  for (const r of list) {
+    if (!/Sql\/servers|KeyVault\/vaults|Storage\/storageAccounts/.test(r.type)) continue;
+    const pub = (r.properties.publicNetworkAccess || "Enabled") !== "Disabled";
+    if (pub && !peTargets.has(r.id)) issues.push({sev:"high", title: r.name + " is reachable on the public endpoint", text: r.type + " has no private endpoint in this inventory and public network access is not disabled."});
+    else if (pub) issues.push({sev:"medium", title: r.name + " still allows public network access", text: "A private endpoint exists, but public access is not disabled, so the private path is not exclusive."});
+  }
+  const pubs = byType("Microsoft.Network/publicIPAddresses");
+  if (pubs.length) issues.push({sev:"info", title: "Internet entry: " + pubs.map(p => p.name + " " + (p.properties.ipAddress || "")).join(", "), text: "Confirm NSG and load-balancer rules only expose intended ports."});
+  if (!issues.length) issues.push({sev:"ok", title: "No connectivity issues in this inventory", text: "Checks cover NSG attachment, private endpoints, public access, and private DNS."});
+  return issues;
+}
+function series(name) {
+  const seed = name.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+  return Array.from({length: 24}, (_, i) => 20 + ((seed + i * 17) % 55) + (i > 18 ? 15 : 0));
+}
+function drawUsage(name) {
+  const canvas = document.getElementById("usage");
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  const data = series(name || "none");
+  const max = Math.max(...data) * 1.2;
+  ctx.strokeStyle = "#0078d4"; ctx.lineWidth = 2; ctx.beginPath();
+  data.forEach((v, i) => {
+    const x = 16 + i * ((w - 28) / 23);
+    const y = h - 18 - (v / max) * (h - 32);
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+  ctx.fillStyle = "#605e5c"; ctx.font = "11px Segoe UI";
+  ctx.fillText(usageLive ? "Loaded metrics" : "Sample usage %", 12, 14);
+}
+function render() {
+  const q = document.getElementById("q").value.toLowerCase();
+  const shown = resources.filter(r => (r.name + r.type).toLowerCase().includes(q));
+  document.getElementById("k-res").textContent = resources.length;
+  document.getElementById("k-edge").textContent = edges.length;
+  const issues = checks(resources);
+  document.getElementById("k-high").textContent = issues.filter(i => i.sev === "high").length;
+  document.getElementById("list").innerHTML = shown.map(r => `<div class="res ${selected === r.id ? "on" : ""}" data-id="${r.id}"><img alt="" src="${icon(r.type)}"/><div><b>${r.name}</b><span>${r.type.split("/")[1]} · ${r.location}</span></div></div>`).join("");
+  const layers = ["foundation", "network", "compute", "data", "security"];
+  document.getElementById("cols").innerHTML = layers.map(layer => {
+    const items = shown.filter(r => (LAYER[r.type] || "other") === layer);
+    if (!items.length) return "";
+    return `<div class="col"><h3>${layer}</h3>${items.map(r => `<div class="node ${selected === r.id ? "on" : ""}" id="n-${css(r.id)}" data-id="${r.id}"><img alt="" src="${icon(r.type)}"/><b>${r.name}</b><span>${configLine(r)}</span></div>`).join("")}</div>`;
+  }).join("");
+  document.getElementById("issues").innerHTML = issues.map(i => `<div class="issue ${i.sev}"><b>${i.title}</b><span>${i.text}</span></div>`).join("");
+  const r = resources.find(x => x.id === selected) || shown[0];
+  if (r) show(r);
+  requestAnimationFrame(drawLinks);
+}
+function css(id) { return id.replace(/[^a-z0-9]+/gi, "-"); }
+function configLine(r) {
+  const p = r.properties || {};
+  return p.addressPrefix || (p.addressSpace && p.addressSpace.addressPrefixes[0]) || p.ipAddress || (p.hardwareProfile && p.hardwareProfile.vmSize) || p.accountTier || p.publicNetworkAccess || r.resourceGroup;
+}
+function show(r) {
+  selected = r.id;
+  const p = r.properties || {};
+  const rows = Object.entries({name: r.name, type: r.type, location: r.location, group: r.resourceGroup, ...flat(p)}).slice(0, 8);
+  document.getElementById("detail").innerHTML = "<dl>" + rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("") + "</dl>";
+  drawUsage(r.name);
+  document.querySelectorAll(".res,.node").forEach(el => el.classList.toggle("on", el.dataset.id === r.id));
+}
+function flat(obj, prefix) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj || {})) {
+    if (v && typeof v === "object" && !Array.isArray(v) && v.id) out[k] = v.id.split("/").pop();
+    else if (typeof v !== "object") out[prefix ? prefix + "." + k : k] = v;
+  }
+  return out;
+}
+function drawLinks() {
+  const board = document.getElementById("board");
+  const svg = document.getElementById("links");
+  const rect = board.getBoundingClientRect();
+  svg.setAttribute("viewBox", `0 0 ${board.clientWidth} ${board.clientHeight}`);
+  svg.innerHTML = '<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6" fill="#0078D4"/></marker></defs>';
+  for (const e of edges) {
+    const a = document.getElementById("n-" + css(e.from));
+    const b = document.getElementById("n-" + css(e.to));
+    if (!a || !b) continue;
+    const ar = a.getBoundingClientRect(), br = b.getBoundingClientRect();
+    const x1 = ar.left + ar.width / 2 - rect.left, y1 = ar.top + 22 - rect.top;
+    const x2 = br.left + br.width / 2 - rect.left, y2 = br.top + 22 - rect.top;
+    const mid = (x1 + x2) / 2;
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`);
+    path.setAttribute("fill", "none"); path.setAttribute("stroke", "#0078D4"); path.setAttribute("stroke-width", "1.4");
+    path.setAttribute("marker-end", "url(#arrow)");
+    svg.appendChild(path);
+  }
+}
+function load(raw, label) {
+  resources = expand(raw);
+  edges = buildEdges(resources);
+  selected = resources[0] && resources[0].id;
+  document.getElementById("scope").textContent = label + " · " + resources.length + " resources";
+  usageLive = false;
+  document.getElementById("k-use").textContent = "sample";
+  render();
+}
+document.getElementById("q").addEventListener("input", render);
+document.getElementById("set").addEventListener("change", e => load(e.target.value === "tf" ? TF : SAMPLE, e.target.value === "tf" ? "ai_model Terraform" : "rg-prod sample"));
+document.getElementById("load").addEventListener("click", () => document.getElementById("file").click());
+document.getElementById("file").addEventListener("change", async e => {
+  const file = e.target.files[0]; if (!file) return;
+  load(JSON.parse(await file.text()), file.name);
+});
+document.body.addEventListener("click", e => {
+  const el = e.target.closest("[data-id]");
+  if (!el) return;
+  const r = resources.find(x => x.id === el.dataset.id);
+  if (r) show(r);
+});
+window.addEventListener("resize", drawLinks);
+load(SAMPLE, "rg-prod sample");
+</script>
+</body>
+</html>
