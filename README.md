@@ -37,9 +37,11 @@ python3 azure-rg-diagram/scripts/build_diagram.py \
 
 Result: **11 resources, 9 edges**. Nested subnets are expanded. Key Vault stays unlinked because the export has no resource-id reference to it.
 
+![rg-prod sample diagram](docs/sample-rg-prod.png)
+
 Preview the generated picture: [sample-out/diagram.html](sample-out/diagram.html). Editable file: [sample-out/diagram.drawio](sample-out/diagram.drawio).
 
-Layout is columns left to right: network, compute, data, security. Each node is an Azure architecture icon plus the resource name.
+Layout is columns left to right: network, compute, data, security. Each node is an Azure architecture icon plus the resource name. Key Vault is drawn with its icon and left unlinked.
 
 Relationships:
 
